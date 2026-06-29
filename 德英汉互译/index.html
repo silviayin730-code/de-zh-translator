@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>德英汉互译 — 双语翻译工具</title>
+
+  <!-- ==================== 第三方CDN库 ==================== -->
+  <!-- mammoth.js: DOCX文件文本提取 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js">
+  </script>
+
+  <!-- PDF.js: PDF文件文本提取 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js">
+  </script>
+
+  <!-- SheetJS (xlsx): Excel文件导出 -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js">
+  </script>
+
+  <!-- jsPDF: PDF文件生成 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/3.0.4/jspdf.umd.min.js">
+  </script>
+
+  <!-- jspdf-autotable: jsPDF表格插件 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js">
+  </script>
+
+  <!-- html2canvas: 网页截图（用于PDF中文渲染） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js">
+  </script>
+
+  <!-- ==================== 样式表 ==================== -->
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- ==================== PDF.js Worker 配置 ==================== -->
+  <script>
+    // 设置PDF.js的worker脚本路径（从CDN加载）
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+</head>
+<body>
+
+<!-- ==================== 顶部导航栏 ==================== -->
+<header class="app-header">
+  <div class="header-left">
+    <span class="logo-icon">🔤</span>
+    <h1 class="app-title">德英汉互译</h1>
+    <span class="app-subtitle">德语 ↔ 中文 | 英语 ↔ 中文</span>
+  </div>
+  <div class="header-right">
+    <button class="btn btn-outline" id="btnGlossary" title="管理自定义术语表">
+      📖 术语表
+    </button>
+    <button class="btn btn-outline" id="btnSettings" title="API Key 与保留设置">
+      ⚙️ 设置
+    </button>
+  </div>
+</header>
+
+<!-- ==================== 主体内容区 ==================== -->
+<main class="app-main">
+
+  <!-- ===== 上半部分：翻译工作区（左右分栏） ===== -->
+  <div class="translate-panel">
+
+    <!-- 左侧：输入区 -->
+    <section class="input-section">
+      <!-- 语言对选择 -->
+      <div class="lang-selector">
+        <select id="selectSourceLang" class="lang-select">
+          <option value="de">德语 (Deutsch)</option>
+          <option value="en">英语 (English)</option>
+          <option value="zh">中文</option>
+        </select>
+        <button class="btn-swap" id="btnSwapLang" title="交换语言方向">⇄</button>
+        <select id="selectTargetLang" class="lang-select">
+          <option value="zh" selected>中文</option>
+          <option value="de">德语 (Deutsch)</option>
+          <option value="en">英语 (English)</option>
+        </select>
+        <span class="lang-arrow">→</span>
+      </div>
+
+      <!-- 文本输入框 -->
+      <textarea
+        id="inputText"
+        class="input-textarea"
+        placeholder="在此输入要翻译的文本，或点击下方按钮上传文件..."
+        rows="8"
+      ></textarea>
+
+      <!-- 实时字幕预览区 -->
+      <div class="subtitle-bar" id="subtitleBar">
+        <span class="subtitle-label">⚡ 实时字幕：</span>
+        <span class="subtitle-text" id="subtitleText">输入文本后将自动显示翻译预览...</span>
+        <span class="subtitle-status" id="subtitleStatus"></span>
+      </div>
+
+      <!-- 文件上传按钮组 -->
+      <div class="file-upload-row">
+        <label class="btn btn-upload" title="上传 .docx Word文档">
+          📎 上传 DOCX
+          <input type="file" id="fileDOCX" accept=".docx" hidden>
+        </label>
+        <label class="btn btn-upload" title="上传 .pdf PDF文档">
+          📎 上传 PDF
+          <input type="file" id="filePDF" accept=".pdf" hidden>
+        </label>
+        <span class="file-info" id="fileInfo"></span>
+      </div>
+    </section>
+
+    <!-- 右侧：翻译结果区 -->
+    <section class="output-section">
+      <div class="output-header">
+        <h3 class="output-title">📝 翻译结果</h3>
+        <div class="output-actions">
+          <span class="cache-badge" id="cacheBadge" style="display:none;">⚡ 来自缓存</span>
+          <button class="btn btn-sm" id="btnCopy" title="复制译文到剪贴板">📋 复制</button>
+          <button class="btn btn-sm btn-primary" id="btnTranslate" title="手动触发翻译">🔄 翻译</button>
+          <button class="btn btn-sm btn-export" id="btnExportCurrentExcel"
+                  title="导出当前翻译为Excel段落对照表" disabled>📥 导出Excel</button>
+          <button class="btn btn-sm btn-export" id="btnExportCurrentPDF"
+                  title="导出当前翻译为PDF段落对照表" disabled>📥 导出PDF</button>
+        </div>
+      </div>
+      <div class="output-content" id="outputContent">
+        <p class="output-placeholder">翻译结果将在此显示...</p>
+      </div>
+      <!-- 翻译进度条（超长文本分段翻译时显示） -->
+      <div class="progress-bar" id="progressBar" style="display:none;">
+        <div class="progress-fill" id="progressFill"></div>
+        <span class="progress-text" id="progressText"></span>
+      </div>
+    </section>
+  </div><!-- .translate-panel 结束 -->
+
+  <!-- ===== 下半部分：历史记录区 ===== -->
+  <section class="history-section">
+    <div class="history-header">
+      <h3 class="history-title">📊 翻译历史</h3>
+      <div class="history-controls">
+        <!-- 关键字搜索 -->
+        <input
+          type="text"
+          id="searchInput"
+          class="search-input"
+          placeholder="🔍 搜索原文或译文..."
+        >
+        <!-- 导出按钮 -->
+        <button class="btn btn-export" id="btnExportExcel" title="导出为Excel表格">
+          📥 导出 Excel
+        </button>
+        <button class="btn btn-export" id="btnExportPDF" title="导出为PDF文档">
+          📥 导出 PDF
+        </button>
+        <!-- 批量操作 -->
+        <button class="btn btn-danger" id="btnClearAll" title="清空全部历史记录">
+          🗑 清空全部
+        </button>
+      </div>
+    </div>
+
+    <!-- 历史记录列表容器 -->
+    <div class="history-list" id="historyList">
+      <p class="history-empty">暂无翻译记录</p>
+    </div>
+
+    <!-- 分页按钮 -->
+    <div class="history-pagination" id="historyPagination" style="display:none;">
+      <button class="btn btn-sm" id="btnPrevPage" disabled>上一页</button>
+      <span class="page-info" id="pageInfo">第 1 页</span>
+      <button class="btn btn-sm" id="btnNextPage">下一页</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- ==================== 术语表弹窗 ==================== -->
+<div class="modal-overlay" id="modalGlossary" style="display:none;">
+  <div class="modal-content modal-wide">
+    <div class="modal-header">
+      <h3>📖 自定义术语表</h3>
+      <button class="btn-close" id="btnCloseGlossary">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- 添加术语表单 -->
+      <div class="glossary-add-row">
+        <select id="glossarySourceLang" class="lang-select-sm">
+          <option value="de">德语</option>
+          <option value="en">英语</option>
+          <option value="zh">中文</option>
+        </select>
+        <input type="text" id="glossarySource" class="glossary-input" placeholder="源词（如：Maschinelles Lernen）">
+        <span class="glossary-arrow">→</span>
+        <select id="glossaryTargetLang" class="lang-select-sm">
+          <option value="zh" selected>中文</option>
+          <option value="de">德语</option>
+          <option value="en">英语</option>
+        </select>
+        <input type="text" id="glossaryTarget" class="glossary-input" placeholder="目标词（如：机器学习）">
+        <button class="btn btn-primary btn-sm" id="btnAddGlossary">➕ 添加</button>
+      </div>
+      <!-- 术语列表 -->
+      <div class="glossary-list" id="glossaryList">
+        <p class="glossary-empty">暂无术语条目，请添加</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 设置弹窗 ==================== -->
+<div class="modal-overlay" id="modalSettings" style="display:none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>⚙️ 设置</h3>
+      <button class="btn-close" id="btnCloseSettings">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- API Key -->
+      <div class="setting-group">
+        <label class="setting-label" for="settingAPIKey">
+          DeepSeek API Key
+          <span class="setting-hint">（必填，以 sk- 开头）</span>
+        </label>
+        <input type="password" id="settingAPIKey" class="setting-input"
+               placeholder="sk-xxxxxxxxxxxxxxxx">
+        <button class="btn btn-sm" id="btnToggleKey">👁 显示</button>
+      </div>
+
+      <!-- 保留天数 -->
+      <div class="setting-group">
+        <label class="setting-label">翻译记录保留天数</label>
+        <div class="setting-radio-group">
+          <label class="radio-label">
+            <input type="radio" name="retentionDays" value="1"> 1 天
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="retentionDays" value="3" checked> 3 天
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="retentionDays" value="5"> 5 天
+          </label>
+        </div>
+        <span class="setting-hint">到期后自动清理过期翻译记录</span>
+      </div>
+
+      <!-- 存储状态 -->
+      <div class="setting-group">
+        <label class="setting-label">存储状态</label>
+        <div class="storage-stats" id="storageStats">
+          <span>加载中...</span>
+        </div>
+        <button class="btn btn-sm btn-danger" id="btnForceCleanup">🧹 立即清理过期记录</button>
+      </div>
+
+      <!-- 保存按钮 -->
+      <button class="btn btn-primary btn-full" id="btnSaveSettings">💾 保存设置</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 确认弹窗（通用） ==================== -->
+<div class="modal-overlay" id="modalConfirm" style="display:none;">
+  <div class="modal-content modal-small">
+    <div class="modal-header">
+      <h3 id="confirmTitle">确认操作</h3>
+      <button class="btn-close" id="btnCloseConfirm">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="confirmMessage">确定要执行此操作吗？</p>
+      <div class="confirm-actions">
+        <button class="btn btn-outline" id="btnConfirmCancel">取消</button>
+        <button class="btn btn-danger" id="btnConfirmOk">确认</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== Toast 消息提示 ==================== -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ==================== JavaScript 模块（按依赖顺序加载） ==================== -->
+<script src="js/settings.js"></script>    <!-- 1. 设置模块（无依赖，最底层） -->
+<script src="js/glossary.js"></script>    <!-- 2. 术语表模块（依赖 settings） -->
+<script src="js/memory.js"></script>      <!-- 3. 记忆缓存模块（依赖 settings） -->
+<script src="js/translator.js"></script>  <!-- 4. 翻译核心（依赖 settings + memory + glossary） -->
+<script src="js/fileHandler.js"></script> <!-- 5. 文件处理（独立，解析后调 translator） -->
+<script src="js/history.js"></script>     <!-- 6. 历史记录（依赖 translator 回调） -->
+<script src="js/export.js"></script>      <!-- 7. 导出模块（依赖 history） -->
+<script src="js/cleanup.js"></script>     <!-- 8. 自动清理（依赖 settings + history + memory） -->
+<script src="js/app.js"></script>         <!-- 9. 应用入口（组装所有模块，最后加载） -->
+
+</body>
+</html>
